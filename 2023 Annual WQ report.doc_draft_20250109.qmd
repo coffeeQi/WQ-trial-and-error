@@ -868,10 +868,10 @@ Notably,
 #this chunk will create 5 figures, one for each param x location
 #This wor/s if Specific_conductance_uS_cm is used but not mS_cm
 #For this to be useful, we should put all the text for parameters by location first, then several pages of the figures with captions.
-#To Do: Adding Captions through R code - use the Assign function to say 1=DO, 2=Temp etc. Aleyna has an R Mar/down file that does this.
+#Captions added using the Assign function to say Fig.1 pH by location, Fig.2 Temp by location etc
+
 #set parameter names
 parameters <- c("pH", "Temperature_C", "Dissolved_oxygen_mg_L", "Specific_conductance_uS_cm", "Turbidity_NTU")
-
 
 # Create numbered titles using assign()
 for (i in seq_along(parameters)) {
