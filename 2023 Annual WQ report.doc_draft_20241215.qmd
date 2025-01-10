@@ -1,0 +1,931 @@
+---
+title: "Chickaloon Native Village <br> Stream Water Quality, Water Quality Year 2022"
+author: "K. Zamzow"
+format: 
+  docx:
+    toc: true
+    toc-depth: 4
+    number-sections: true
+    df-print: paged
+  html:
+    toc: true
+    toc-location: left 
+    toc-float: true
+    toc-collapsed: false
+    toc-depth: 4
+    number-sections: true
+    lof: true
+    lot: true
+
+---
+<br>
+<br>
+```{r}
+#| label: some-Quarto-differences
+#| eval: false
+#| echo: false
+#| 
+#If I want sections only numbered through subsection 2, use number-depth: 2 instead of number-sections: true
+#comment: where R Markdown uses an underscore_, Quarto uses a hyphen -. For example df (which refers to dataframes) is df-print in Quarto. For html output, may want to use df-print: kable
+#R Markdown format header-includes becomes Quarto include-in-header
+```
+
+```{r}
+#| label: differences-in-version-2-report
+#| eval: false
+#| echo: false
+
+# v2 removes the Season stuff, including the Season xlsx, because TAC didnt want it
+# changes the column names of the original WQ data set to not have (C), (ms/cm), etc -- no parentheses. this is easier for ggplot
+#uses some for-loops
+#removes data sets that have Moose Cree 1.3 in them (formerly had SiteIDDown15_ which had MC1.3, now use SiteIDDown)
+```
+
+```{r}
+#| label: set-knitr
+#| include: false
+#| echo: false
+#| message: false
+#| warning: false
+#| error: false
+
+knitr::opts_chunk$set(echo = FALSE, message =FALSE, warning=FALSE, error = FALSE)
+```
+
+```{r}
+#| label: set-TOC
+#| eval: false 
+
+#to put TOC in any place we want, see https://www.garrickadenbuie.com/blog/add-a-generated-table-of-contents-anywhere-in-rmarkdown/#use-it.  Will need to have devtools render_TOC as below
+##Note that css is only for html; to define what you want in TOC for a docx, you need to link to a reference document in the YAML headers as html: css: styles-html.css then docx: reference-doc: custom-reference.docx
+#below is what I used for docx TOC, but I don't have a reference docx
+#TOC {position: fixed;left: 0;top: 0;width: 250px;height: 100%;overflow:auto}
+#This is what we would put in YAML but placing it all there also puts the TOC right under the title? word: toc: true toc-depth: 4 df-print: paged
+
+#this deals with table of contents location by accessing a GitHub site - the long string is the unique ID for the specific GitHub Gist and says the file we are looking for a file called "render_toc".
+
+devtools::source_gist("c83e078bf8c81b035e32c3fc0cf04ee8", filename = 'render_toc.R')
+
+```
+
+```{r}
+#| label: setup
+#| include: FALSE
+#| echo: FALSE
+#| warning: FALSE
+#| error: FALSE
+#| message: FALSE
+
+```
+
+```{r}
+#| label: libraries
+
+library(RODBC)
+library(readxl)
+library(tidyverse)
+library(knitr) 
+library(lubridate)
+library (tools)
+library (geojsonsf)
+library (latexpdf)
+library (tinytex)
+library (xtable)
+library (jpeg)
+library(openxlsx)
+library(magick)
+library(av)
+library(flextable)
+library(gtable)
+library(gridBase)
+library(gridExtra)
+library(gridtext)
+library(ggplot2)
+library(cowplot)
+library(svglite)
+library(dataRetrieval)
+library(scales)
+library(treemap)
+library(treemapify)
+library (mapview)
+library(sf)
+library(leafem)
+library(leaflet)
+library(leafsync)
+library(viridisLite)
+library(viridis)
+library(RColorBrewer)
+library(randomcoloR)
+library(colorspace)
+library(bookdown)
+```
+
+```{r}
+#| label: flextable-defaults
+
+set_flextable_defaults(
+  font.size = 10,
+  digits = 2
+  )
+init_flextable_defaults()
+```
+
+```{r}
+#|label: define-the-folders-to-pull-information-from
+
+base_dir <- "~/Office related/CNV/WQ monitoring/Baseline stream WQ/WQ monitoring_Reports/2023 WQ report"
+data_dir<- paste0(base_dir,"/Data/")
+map_dir<- paste0(base_dir,"/Shapefiles/")
+image_dir <- paste0(base_dir,"/Images/")
+```
+
+```{r}
+#|label: data-sheets
+#|include: false
+#|results: false 
+
+#The WQDataFull is needed for counting the number of times a site was visited or missed, etc.
+#also note that you will get warnings if this chun/ is run but it is okay. For WQData, it's because 2015-2020 didn't have many of the columns filled out, for QCData it is because there is extra info we don't need in Columns A and B (but we will be selecting specific rows and columns when we use it).
+
+WQDataRaw<-read_excel(paste0(data_dir, "WQ data 2015-2023.xlsx"))
+QCData<-read_excel(paste0(data_dir,"WQ QC tables for 2023 Report.xlsx"))
+Locations<- read_excel(paste0(data_dir, "WQ locations for 2023 report.xlsx"))
+
+```
+
+```{r}
+#| label: rename-columns
+
+#rename specific columns that cause problems if there are parentheses. 2024.12.05
+
+WQDataColumns<- WQDataRaw%>%
+  rename(
+    Temperature_C = `Temperature (C)`, 
+    Specific_conductance_mS_cm = `Specific conductance (mS/cm)`,
+    Dissolved_oxygen_percent = `Dissolved oxygen (%)`,
+    Dissolved_oxygen_mg_L = `Dissolved oxygen (mg/L)`,
+    Turbidity_NTU = `Turbidity (NTU)`
+    )
+```
+
+```{r}
+#note that previously we also used the "round" function here, but that actually won't wor/ -- need to convert these "characters" (label icon) to data frames. However, the na.rm=TRUE doesn't wor/ -- each parameter comes out with lots of NAs.
+
+#| label: convert-parameters-to-numeric
+#| results: false 
+
+Temperature_C<-as.numeric(WQDataColumns$Temperature_C, na.rm=TRUE)
+Temperature_F<-as.numeric(WQDataColumns$Temperature_C*(9/5)+32)
+
+Specific_conductance_mS_cm<-as.numeric(WQDataColumns$Specific_conductance_mS_cm, na.rm=TRUE)
+Specific_conductance_uS_cm<-as.numeric(WQDataColumns$Specific_conductance_mS_cm*1000)
+
+DO_mg_L<-as.numeric(WQDataColumns$Dissolved_oxygen_mg_L, na.rm=TRUE)
+
+pH<-as.numeric(WQDataColumns$pH, na.rm=TRUE)
+
+Turbidity<-as.numeric(WQDataColumns$Turbidity_NTU, na.rm=TRUE)
+
+Date<-as.Date.POSIXct(WQDataColumns$Date, na.rm=TRUE)
+
+```
+
+```{r}
+#| label: reduce-to-only-necessary-columns
+#| results: false
+#| 
+#Create WQData as the main document to work from, with fewer columns and with an option for SC in uS/cm. 2024.12.05
+
+WQData<-WQDataColumns%>%
+  dplyr::select(Date, SiteID, SiteName, Season, pH, Temperature_C, Dissolved_oxygen_mg_L, Specific_conductance_mS_cm, Turbidity_NTU) %>%
+  mutate(Temperature_F)%>%
+  mutate(Specific_conductance_uS_cm)%>%
+  mutate(Month=month(Date))
+
+#this Month column will now follow through to all other types of WQ data sets. 2024.12.05
+```
+
+```{r}
+#| label: month-names
+#| results: false
+
+month<-c(1,2,3,4,5,6,7,8,9,10,11,12)
+month.abb[month]
+
+#This converts all month numbers to abbreviated names
+WQData$Month<-month.abb[WQData$Month]
+
+#This sets up the preferred sequence for plotting later
+Month_Seq<-factor(WQData$Month, c("May","Jun","Jul","Aug","Sep", "Oct","Nov", "Dec", "Jan","Feb","Mar","Apr"))
+
+```
+
+```{r}
+#| label: set-up-WQ-years
+#| results: false 
+
+#for comparison, use WQY2022 and years prior to it
+
+WQY2015_<-WQData%>%
+  dplyr::filter(Date<ymd(20220501))
+
+WQY2022<-WQData%>%
+  dplyr::filter(Date>ymd(20220430))%>%
+  dplyr::filter(Date<ymd(20230501))
+```
+
+```{r}
+#| label: group-daily-replicates-into-daily-mean
+#| results: false
+
+WQDayMean2022<-WQY2022%>%
+  group_by(Date, Month, SiteID, SiteName)%>%
+  dplyr::select(pH, Temperature_C, Temperature_F, Dissolved_oxygen_mg_L, Specific_conductance_uS_cm, Turbidity_NTU)%>%
+  summarise(across(c(1:6), ~mean(.x, na.rm=TRUE)))
+
+WQDayMean2015_<-WQY2015_%>%
+  group_by(Date, Month, SiteID, SiteName)%>%
+    dplyr::select(pH, Temperature_C, Temperature_F, Dissolved_oxygen_mg_L, Specific_conductance_uS_cm, Turbidity_NTU)%>%
+  summarise(across(c(1:6), ~mean(.x, na.rm=TRUE)))
+
+```
+
+```{r}
+#| label: WQ-day-mean-code-that-wont-work
+#| eval: false
+
+#note that you need the dplyr: select part of the chunk above
+WQDayMean2015_<-WQY2015_%>%
+  group_by(Date, Month, SiteID, SiteName)%>%
+  summarise(across(c(1:6), ~mean(.x, na.rm=TRUE)))
+```
+
+```{r}
+#| label: WQDayMeans-by-month
+#| results: false
+
+#daily means for site replicates in WQ year to be plotted by month name
+
+WQDayMean<-rbind(WQDayMean2015_, WQDayMean2022)
+
+Month<-c(1,2,3,4,5,6,7,8,9,10,11,12)
+month.abb[Month]
+
+WQDayMean15_MonthSeq<-factor(WQDayMean2015_$Month, c("May","Jun","Jul","Aug","Sep", "Oct","Nov", "Dec", "Jan","Feb","Mar","Apr"))
+WQDayMean2022_MonthSeq<-factor(WQDayMean2022$Month, c("May","Jun","Jul","Aug","Sep", "Oct","Nov", "Dec", "Jan","Feb","Mar","Apr"))
+
+```
+
+```{r}
+#| label: PAL-lines-for-ggplots
+#| results: false
+
+WQC_DO<-geom_hline(yintercept =7, color ="red")
+WQC_DO2<- geom_vline(xintercept=7, color="red")
+WQC_Temp1<-geom_hline(yintercept =13, color ="blue")
+WQC_Temp2<-geom_hline(yintercept =15, color ="dark green")
+WQC_Temp3<-geom_hline(yintercept =20, color ="red")
+WQC_pH1<-geom_hline(yintercept=6.5, color = "blue")
+WQC_pH2<-geom_hline(yintercept=8.5, color="red")
+WQC_turbidity<-geom_hline(yintercept=25, color="blue")
+WQC_SC<-geom_hline(yintercept=447, color="dark green")
+```
+
+```{r}
+#| label: directories-to-pull-shapefiles-from
+#| eval: false 
+#| results: false
+
+#use eval false until ready to run maps
+
+TSI_dir<-paste0(map_dir,"./NHD_H_19020402_HU8_Shape/Shape/")
+CLR_dir<-paste0(map_dir, "./Curran 2011 Clearwater channels shapefiles/")
+MIN_dir<-paste0(map_dir,"./Mining leases and claims/")
+WOL_dir<-paste0(map_dir,"./CMCNA WOL parcels/")
+MSBWater_dir<-paste0(map_dir,"./Environment_Waterbodies_MSB/")
+MSB_dir<-paste0(map_dir, "./Boroughs/")
+AWC_dir<-paste0(map_dir, "./AWC Southcentral/")
+AWC2_dir<-paste0(map_dir, "./AWC Statewide/")
+
+```
+
+```{r}
+#| label: call-in-shapefiles
+#| eval: false
+#| results: false
+
+#call out specific shapefiles within directory (folder)
+#use eval false until ready to run maps
+
+MatWshdHUC8 <- sf::read_sf(paste0(TSI_dir,'WBDHU8.shp'))
+MatWshdHUC10 <- sf::read_sf(paste0(TSI_dir,'WBDHU10.shp'))
+MatWshdHUC12 <- sf::read_sf(paste0(TSI_dir,'WBDHU12.shp'))
+ClearwaterRiverChannels <- sf::read_sf(paste0(CLR_dir, '2006_sidechannels.shp'))
+MinLease <- sf::read_sf(paste0(MIN_dir,"Mineral_Permit_Or_Lease_Py.shp"))
+MinClaim<-sf::read_sf(paste0(MIN_dir,"State_Mining_Claim_Py.shp"))
+WOLparcels<-sf::read_sf(paste0(WOL_dir,'Land Ownership.shp'))
+MSBWater<-sf::read_sf(paste0(MSBWater_dir, 'Environment_Waterbodies_MSB.shp'))
+Towns<-sf::read_sf(paste0(MSB_dir, 'Towns_Pt.shp'))
+AWC1<-sf::read_sf(paste0(AWC_dir, "scn_point.shp"))
+AWC2<-sf::read_sf(paste0(AWC_dir, "scn_stream.shp"))
+```
+
+```{r}
+#| label: cover-logo
+#| fig-cap: ""
+#| out-width: "15%"
+#| fig-align: left
+
+knitr::include_graphics(paste0(image_dir,"CVTC logo.jpg"))
+```
+
+```{r}
+#| label: cover-pic
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig-cap: ""
+#| out-width: "100%"
+#| fig-align: center
+
+knitr::include_graphics(paste0(image_dir,"cover photo.jpg"))
+```
+Prepared by <br> 
+Chickaloon Village Traditional Council <br> 
+Environmental Stewardship Department <br> <br> 
+
+
+Prepared for <br> 
+Chickaloon Village Traditional Council <br> 
+and <br> 
+US Environmental Protection Agency <br> <br> 
+`r Sys.Date()` <br>
+
+<br>
+
+# Executive Summary TO UPDATE
+
+<br> Chickaloon Village Traditional Council Environmental Stewardship Department (CVTC ESD, or ESD) has conducted baseline stream water quality monitoring from 2015 to 2023 (ongoing). This report documents and analyzes one year of data from May 2022 (spring breakup) to April 2023....
+
+<br>
+
+
+# Background
+
+<br> Nay’dini’aa Na Kayax (Chickaloon Native Village) is an Ahtna Dene Tribe in southcentral Alaska....<br>
+
+
+## Project history, objectives, and staff - updated
+ 
+<br> This CVTC Surface Water Quality Monitoring Project provides the only baseline surface water quality data available on many water bodies in the Matanuska Watershed. CVTC has conducted baseline water quality data collection since 2015 with funding from federal grants including  EPA IGAP, BIA Subsistence, and USFWS Tribal Wildlife Grants. Work has been conducted following CVTC-written and EPA-approved Quality Assurance Project Plan (QAPP). The latest CVTC Surface Water Quality Monitoring QAPP was approved on April 27, 2021.
+ 
+*Objective:* 1) To develop a baseline data set of surface water quality in the Matanuska Watershed, from water bodies important to the Tribe and representative of the many types of streams and rivers in the area. 2) To observe and measure trends in natural systems that may occur from natural or anthropogenic influences.  
+
+*Staff:* CVTC Environmental Stewardship Department (ESD) staff working on the project consists of Kendra Zamzow, PhD (Field Sampling Leader/Project Manager) and Jessica Winnestaffer (QA Officer/ESD Director).  Dr. Zamzow updates the QAPP, maintains and calibrates equipment, collects field data, reviews data for accuracy, precision, and completeness, and uploads data to the EPA WQX site.  Jessica assures the QA/QC work has been completed by competent staff and provides  review and edits to the QAPP, data, and reports.  Additional ESD staff members may assist with field data collection or data review. <br>
+
+<br>Threats to water quality include:  
+
+* Resource development, particularly coal and placer mining
+* Increasing human population, with growing presence of roads, subdivisions, cabins, and off-road vehicles
+* Climate change  
+
+Details of these threats are provided in the "Maps" Appendix.
+<br>
+<br>
+
+
+## Project activities and updates - add more?
+
+<br> Activities:
+
+* Develop an accurate, defensible baseline data set of surface water quality 
+* Monitor streams for changes in water quality over time
+* Maintain a QAPP
+
+Sampling is conducted once a month at every site.  Winter sampling began in winter 2020-2021 and continued through the current year. Annual water quality reports are now provided on a cycle that follows the streams: from May, when breakup typically occurs, to April. This report covers May 2022 through April 2023.<br>
+
+Updates:
+<br>
+* Water levels were very high in the Matanuska River and in Moose Creek this summer. 
+
+  * The clearwater river side-channel site added last year, Ts'itonhna Channel 44.6 at Milepost 68, was flooded out when the braided river moved into the channel and absorbed it.  This site has been dropped.
+
+  * A different clearwater river side-channel, an important one for traditional harvesting, was added.
+
+  * At the mouth of Moose Creek, floodwaters caused bank erosion and trees on the bank were washed into the creek.  The river plain between the mouth of Moose Creek and Kleinschmidt Slough was changed.
+  
+  * Despite high waters at Moose Creek, the water level of spring-fed Kleinschmidt Slough (which flows into the mouth of Moose Creek) did not change.
+
+* The YSI 556 field meter used in prior years was replaced by a YSI ProPlus field meter.
+
+* Reports now include information on anadromous fish at the monitored streams, the stream order (with headwater streams being first order), interactive maps as a separate document, and recommendations for future sampling.  
+
+* Maps are now in an appendix instead of in the body of the report. Background information on the watershed, including maps of anadromous waters, is placed with the maps. 
+
+* Tables of data have been added as an appendix. <br>
+
+
+## Where we go - updated
+<br>  
+Chickaloon Tribe monitors streams along most of the length of Ts'itonhna, from Sutton to Glacier View, with two sites near Palmer (Map 3.4.1 in Maps appendix). Approximately 18 sites are visited on a monthly basis in summer, with 15 sites monitored monthly in winter (Table 2.4.1). Most streams are sampled at only a single location (Table 2.4.2). All sample sites are on streams that drain directly or indirectly into the Matanuska River (Ts'itonhna).  All but three monitored streams are anadromous for at least part of their length. The three that are not are California Creek, Hicks Creek, and Purinton Creek.  California Creek has a natural barrier to fish passage; Hicks Creek can be turbid for many months which may prevent use; Purinton Creek can be turbid but much less so than Hicks Creek.<br>
+<br>
+<br>
+
+### *Monitored streams*
+Stream names in English and, where known, in Ahtna Athabascan are shown (Table 2.4.1), followed by the site ID code and locations for each monitored site (Table 2.4.2).  Site ID codes are used in many of the figures in this report.
+
+**Table 2.4.1 Stream names**
+<br>Streams are listed with the names listed on maps and the original Ahtna name as best known. Some names or dialects were not able to be passed to todays generation.<br>
+
+|English name| Ahtna name| English translation| Source|
+|:-----|:-----|:-------|:----------|
+|Caribou Creek| Nataghilen na’| head that sticks out creek| Ahtna youtube|
+|Hicks Creek| no known Ahtna name|||
+|Purinton Creek| K’ay ‘delghots’ na|willow gap creek|Ahtna youtube|
+|California Creek|no known Ahtna name |||
+|Chickaloon River| Nay’dini’aa na’|two logs across the river|Chickaloon Tribe knowledge holders|
+|Kings River|Staeł na’|from taeł "wide, flat" |Ahtna Athabascan dictionary 1990|
+|Granite Creek|Hdighilen na’|creek that flows down canyon|Ahtna youtube|
+|Eska Creek| Ts’es Tac’ilaexde| swims among the rocks| Chickaloon Tribe knowledge holders|
+|Moose Creek|Tsedek’et na’|grandmothers place creek|Chickaloon Tribe knowledge holders|
+|Buffalo Creek|no known Athna name|||
+|Kleinschmidt Spring (Slough)|no known Ahtna name|||
+|Wolverine Creek|Tsiis t’el’iixden/ Cizdlen de|where ochre is gathered/ where current flows|Ahtna Athabascan dictionary/ Ahtna youtube|
+<br>
+
+**Table 2.4.2 Stream sites**
+<br>
+
+*Streams with a single monitoring site*
+<br> Sites are listed with English names from upstream to downstream location. Locations are decimal degrees as NAD 83. Site ID names are the first three letters of the stream name followed by three letters indicating creek, river, or spring and the number of river kilometers from the Matanuska River or from the confluence with a larger stream. Where there are multiple sites on one stream, the most upstream site has the highest number. Stream order is the order at the sample site, and is based on the Strahler system (first order streams are headwater streams, where two first order streams join becomes a second order streams, where two second order streams join becomes a third order stream).The map used to identify stream junctions can be found at https://arcg.is/1a84LO. <br>
+
+
+|Site Name| Site ID|Stream Order|Latitude| Longitude|
+|:--|:-|:----|:-----|:-----|
+|Caribou Creek|CARCRK 2.8|Six |61.8024|-147.6860|
+|Hicks Creek|HICCRK 0.5|Six| 61.7912|-147.9363|
+|Purinton Creek|PURCRK 5.2|Fifth| 61.8114|-148.1358|
+|California Creek|CALCRK 0.0 |Fourth| 61.7964|-148.4780|
+|Chickaloon River|CHIRVR 2.3|Seventh| 61.7963|-148.4778|
+|Ts'itonhna Channel|TSICHA 44.6|First | 61.7313|-148.7096|
+|Kings River|KINRVR 0.1|Sixth| 61.7330|-148.7472|
+|Granite Creek|GRACRK 0.3|Fifth| 61.7114|-148.8504|
+|Moose Creek wetlands| 0.0|Third|61.7346|-149.0247|
+|Buffalo Creek|BUFCRK 0.0|First |61.7147|-149.0730|
+|Kleinschmidt Spring (Slough)|KLESPR 0.0|Second |61.6738|-149.0346|
+|Wolverine Lake outlet |WOLOTL 1.7|First |61.6569|-148.9826|
+|Wolverine Creek|WOLCRK 1.7|Fourth |61.6554|-149.0327|
+
+<br>
+<br>
+
+**Streams with multiple sampling stations**
+<br> Sites are listed from upstream to downstream location. Locations are decimal degrees as NAD 83.  <br>
+
+|Site Name| Site ID|Stream Order|Latitude| Longitude|
+|:--|:-|:----|:-----|:-----|
+|Eska Creek (by upper culvert)|ESKCRK 5.5|Fourth |61.7387|-148.9059|
+|Eska Creek (Glenn Highway)|ESKCRK 1.7|Fourth |61.7109|-148.8989|
+|Moose Creek (upper bridge)|MOOCRK 11.7|Fourth |61.7334|-149.0294|
+|Moose Creek (Premier mine)|MOOCRK 6.6|Fourth| 61.7061|-149.0953|
+|Moose Creek (Glenn Highway)|MOOCRK 1.4|Fourth| 61.6829|-149.0481|
+|Moose Creek (mouth)|MOOCRK 0.0|Fourth |61.6732|-149.0378|
+
+<br>
+<br>
+
+### *Anadromous fish* - updated
+<br>Prior to the arrival of *c’etsiy tnaey* (white people), Ahtna people cared for the streams and, according to oral knowledge, likely enhanced the fish populations. These were reduced with the influx of new people and mining. The Chickaloon River, said to have once had all five species of salmon, now has only coho and chum. The sockeye that are said to have been in the wetlands of upper Moose Creek are not there, and salmon populations are so low that none of the streams of the Matanuska watershed are fished to supply the annual Tribal Culture Camp. 
+
+While some of the population declines stem from historic damage, some are more recent and likely due to a combination of historic damage, current population pressures (habitat degradation, fish passage barriers, poaching), and climate change impacts in the freshwater and marine environments.  Declines in salmon populations led the MSB in 2015 to advocate for and achieve a "conservation corridor” (reducing commercial fishing time in the federal waters in the center of Cook Inlet, an area known as the "Exclusive Economic Zone" (EEZ)) to allow more salmon into MSB streams. Although it may be improving the returns of some salmon populations, especially sockeye, Chinook have declined to where there is no fishing or only catch-and-release. Coho, which form the base of income for sport-fishing guides in the Susitna drainage, are in a steep decline.  
+
+Table 2.4.3 shows the anadromous fish currently present at or near stream monitoring sites. <br>
+
+**Table 2.4.3 Anadromous fish at monitored streams**
+<br>Species and life stages known to be in the stream are shown, and those that occur at or near the sample site are shown in bold.  Note that traditional knowledge says all five species of salmon were in Chickaloon River, and that sockeye used to be in the Moose Creek wetlands.
+<br>
+
+|Site ID| Anadromous species present and Life stages|Source|
+|:-----------------|:--------------|:-----------|
+|CARCRK 2.8|**Chum spawning**|AWC 2022|
+|CHIRVR 2.3|Chum spawning, **Coho rearing**|AWC 2022|
+|KINRVR 0.1|**Chum *spawning**, **Chinook spawning**, Coho spawning and rearing, **Coho present** |AWC 2022|
+|GRACRK 0.3|**Chum present, Coho present, Pinks present**, Chinook rearing and spawning, Chum spawning, Coho spawning|AWC 2022|
+|ESKCRK 5.5, ESKCRK 1.7|Chum spawning, Sockeye spawning, **Coho spawning**|AWC 2022|
+|MOOCRK 11.7, 6.6, 1.4, 0.0|**Chinook spawning and rearing, Coho spawning and rearing, Sockeye spawning**, Chum spawning, Pink spawning|AWC 2022|
+|MOOWTL 0.0|**Coho spawning**|ESD staff observation|
+|BUFCRK 0.0|Chinook rearing, Coho present/ **Coho spawning**| AWC 2022 / ESD staff observation, nominated to AWC|
+|KLESPR 0.0|**Chum spawning, Sockeye spawning**|ESD staff observation, nominated to AWC|
+|WOLOTL 1.7|**Coho spawning and rearing, Sockeye present**|AWC 2022|
+|WOLCRK 1.7|**Coho spawning, Chinook present, Sockeye present**|AWC 2022|
+
+<br>
+<br>
+
+
+# Methods
+
+## What we measure and how we measure it - updated
+
+<br> We collected information using equipment that could be carried in the field and could be used to track the general “health” of the water bodies. No laboratory analysis was performed. 
+
+The YSI 556 field meter used in prior years was replaced by a YSI ProPlus field meter. This was used to measure pH, dissolved oxygen (DO), water temperature, and specific conductance (SC); barometric pressure was noted given its relationship to DO. Each of these is referred to as a "parameter". Readings were recorded at three one-minute intervals; if the readings had not stabilized, the YSI probe was allowed to soak longer and more readings were taken, or a note was made on the field sheet that readings were not stable. To measure water turbidity, a single water sample was collected and split into three vials (“split sample”) or three separate samples were collected (“sequential samples”); the method was identified on the field sheet.  Vials were placed in a Hanna turbidimeter to be measured. 
+
+To avoid problems with water freezing on the threads of turbidity vials and the probe transport cup, vials were kept in an inside jacket pocket and dissolved oxygen was calibrated in a heated vehicle near the sampling site.  
+
+At each site, photographs were taken, weather was documented, stream depth at the YSI field meter probe was recorded, and a site sketch and general comments were often added on field sheets.  Data was recorded on paper field sheets and transcribed later into an electronic database for quality control review and to upload to EPA’s WQX public database, after 100% transcription checks of data sheets.  More detail is available in the 2021 QAPP. <br>
+
+<br>
+
+## How we know if water quality is good - no change
+
+<br>The goal of the project is to determine whether water is of good quality for fish or for drinking or for other ways in which water can be enjoyed, as well as to determine whether there are changes over time in streams. To do this, the data collected in the field is compared to Project Action Limits (PALs).<br>
+
+<br>PALs are water quality measurements that, when exceeded over multiple site visits, trigger an action such as researching why the change might be occurring or alerting agencies. The PALs we have chosen (Table 3.2.1) are based on state of Alaska water quality criteria for use by aquatic life; where there are no state regulations in place, the PAL is based on a change from the baseline data collected to date. A measurement outside a PAL may indicate poor water quality or a deviation from normal observations. For further detail, see the 2021 QAPP. Streams may be good habitat for salmon even when parameters fall outside the PAL, if the excursion outside the PAL is brief or if the fish have evolved to adapt to the conditions.<br>
+<br>
+
+**Table 3.2.1. Project Action Limits**
+<br>
+
+|Analytical parameter|Project Action Limit or Alaska Water Quality Standard |
+|:------------------------|:-------------------------------------------|
+|pH|6.5-8.5|
+|Dissolved oxygen (%)|No more than 110% saturation|
+|Dissolved oxygen (mg/L)|5-17 mg/L, and no less than 7 mg/L in anadromous waters|
+|Specific conductance|An increase of 100% or more over the maximum observed in the past in that month|
+|Temperature|< 13 ºC in anadromous salmon spawning areas, < 15 ºC in anadromous salmon migratory/rearing areas, < 20 ºC for all waters|
+|Turbidity|More than 25 NTU above natural conditions in waters used by fish or wildlife; More than 5 NTU for drinking water when natural turbidity is <50 NTU or <10% increase where natural turbidity is >50 NTU, not to exceed a total increase of 25 NTU.|
+|:------------------------|:-------------------------------------------|
+<br>
+<br>
+
+## Flow determines river "seasons" - updated
+<br> To assess parameters across seasons, seasons were defined by the pattern of stream flow (hydrograph). A USGS flow gauge has been operating at Moose Creek since September 1999 (Fig. 3.3.1), and it is the only flow gauge near our sample sites. Based on this, seasons were defined as: <br>
+<br>
+
+-   Spring: rising limb of the hydrograph begins around April 15 and completes around June 15 (2 months).
+-   Summer: peaks and valleys of a generally descending trend in hydrograph run from June 16 to Sep 15 (3 months)
+-   Fall: Declining hydrograph with no peaks runs from about Sep 16 to Nov 15 (2 months)
+-   Winter: Flat hydrograph with no peaks or valleys runs from Nov 16 to April 14 (5 months). 
+<br>
+<br>
+```{r}
+#| label: set-up-flow-hydrograpth
+#| results: false
+
+#Need internet to run this; use eval false unless internet is on
+#modeled after day2lessons
+#super useful to show the very high flows of the last 5 years, and useful in pulling in the USGS data
+
+GaugeMoose <- "15283700" #Moose Creek near Glenn Highway
+pCodes <- c("00060","00010") #60 is discharge, #10 is temperature so we can create a MooseFlow and a MooseGaugeTemp
+
+#this is for only Water Quality Year 2022. To pull in ALL gauge data, use start date=" ", end date=" "
+MooseFlowWQY2022<-readNWISdv(siteNumbers = GaugeMoose, parameterCd = "00060",startDate = "2022-05-01", endDate = "2023-04-30", statCd="00003")%>%renameNWISColumns() %>% select(Date, Flow)%>% mutate(Month = month(Date))%>% mutate(Year=year(Date))
+
+
+#for all years
+MooseFlow<-readNWISdv(siteNumbers = GaugeMoose,parameterCd =  pCodes,startDate = "", endDate = "2023-04-30",statCd = "00003")%>%renameNWISColumns() %>%select(Date, Wtemp, Flow)%>%rename("Temperature_C"=Wtemp) %>%mutate(Month = month(Date))
+
+#set up month names for x axis of flow graph
+Month<-c(1,2,3,4,5,6,7,8,9,10,11,12)
+month.abb[Month]
+MooseFlow$Month<-month.abb[MooseFlow$Month]
+MooseFlowWQY2022$Month<-month.abb[MooseFlowWQY2022$Month]
+
+FlowMonth_Seq<-factor(MooseFlowWQY2022$Month, c("Apr", "May","Jun","Jul","Aug","Sep", "Oct","Nov", "Dec", "Jan","Feb","Mar"))
+```
+<br>
+
+**Fig. 3.3.1 Moose Creek flows.** (Top) Hydrograph of flows in Water Quality Year 2022 at USGS gauge 15283700 on Moose Creek. Flows reached nearly 1500 cfs, some of the highest flows recorded.  The mean average is shown as the smooth blue line. (Bottom) Flows on Moose Creek during the entire period of gauge operation. Historic high flows occurred in 2018 and 2022.
+```{r}
+#| label: Figure-flow-hydrograph
+
+#need internet, use eval false unless internet is on
+#To DO: test out automated figure labeling through quarto instead of adding the Fig.3.3.1 in the text
+
+ggplot(data=MooseFlowWQY2022)+aes(x=FlowMonth_Seq, y=Flow)+aes(x=Date)+geom_line()+scale_x_date(date_breaks = "1 month", date_labels="%b %d %y")+theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+  xlab("")+stat_smooth()
+
+ggplot(data=MooseFlow)+aes(x=FlowMonth_Seq, y=Flow)+aes(x=Date)+geom_line()+scale_x_date(date_breaks = "1 year", date_labels="%Y")+theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+  xlab("")
+```
+
+
+
+# Results - UPDATE IN PROGRESS
+<br>
+All results are ultimately based on individual readings from streams. At each site, parameters are recorded three or more times during each sample event and these replicates are condensed into an average for that site on that day.  The data presented in this report is based off those "day-means", which can be found in tables in Appendix xx.
+
+The means and medians of parameters are influenced by the number of times and seasons in which monitoring occurred. In particular:
+
+* Buffalo Creek is sampled only in winter
+* Ts'itonhna Channel 44.6 (at milepost 68) was sampled only once, in summer, during the water quality year.
+* Ts'itonhna Channel 49.0 (at beaver pond culvert) is a new site and has not been sampled in May, June, or July.
+
+## How data is presented - updated
+<br> Data is presented 
+
+* By parameter (pH, temperature, dissolved oxygen, specific conductance, and turbidity) shown as boxplots by season and location. Tables that inform this section are in Appendix xx.
+
+* By individual stream site, with boxplot figures for season and month for each parameter at the site. Tables that inform this section are in Appendix xx.
+
+Figures are presented in a way that data from the current water year (May 2022-April 2023) can be compared to the collective data from past years (September 2015-April 2022). Figures also show the Project Action Limits (PALs) for parameters. PALs are values that, if exceeded consistently indicate a possible water health concern. More information on PALs is provided in the 2021 QAPP and in Appendix xx of this report.  <br>
+
+<br>
+
+## How characteristics changed from last year - TO UPDATE
+[highlight low/high turbidity, wash out of MOO mouth, trends, etc]
+
+
+
+<br>
+
+
+## Characterization by parameter - updated
+<br>
+Here, each subsection describes a parameter at each location,
+
+* Using boxplots to compare the parameter range in Water Quality Year 2022 to past years (as the aggregate of past data at the site), or 
+* Using facet plots to provide the range for the parameter for all years by season.
+
+For boxplots the grey boxes with orange outline represent Water Quality Year 2022, overlayed on plain boxplots of aggregate past years. Orange dots are outliers for Water Quality Year 2022. PAL lines are shown in boxplot graphs (as horizontal blue, orange, or green lines) and in facet grids (as vertical blue, orange, or red lines). Tables of supporting data are in Appendix xx and Appendix xx.
+
+Information from supporting tables (Appendix xx) is referenced; appendix tables will have an "A" in front (e.g. Table A2.1.1 will be in Appendix 2, section 1). 
+
+<br>
+```{r}
+#| label: Site-locations-in-sequence
+#| results: false
+
+#I think these will only work for plotting an axis in ggplot, not for ordering rows in a table
+
+SiteIDDown15_<-factor(WQDayMean2022$SiteID,c("CARCRK2.8", "HICCRK0.5", "PURCRK5.2", "CALCRK0.0", "CHIRVR2.3", "TSICHA49.0", "TSICHA44.6", "KINRVR0.1", "GRACRK0.3", "ESKCRK5.5", "ESKCRK1.7", "MOOCRK11.7", "MOOCRK6.6", "MOOCRK1.4", "MOOCRK0.0", "MOOWTL0.0", "BUFCRK0.0", "KLESPR0.0", "WOLOTL1.7", "WOLCRK1.7"))
+
+SiteNameDown15_<-factor(WQDayMean2022$SiteName, c("Caribou Creek", "Hicks Creek", "Purinton Creek", "California Creek", "Chickaloon River", "Ts'itonhna Channel @ beaver pond culvert", "Ts'itonhna Channel @ MP 68", "Kings River",  "Granite Creek", "Eska Creek (above upper culvert)", "Eska Creek (above Glenn Highway)", "Moose Creek (at upper bridge)", "Moose Creek (at Premier Mine)", "Moose Creek (above Glenn Highway)", "Moose Creek (mouth)", "Moose Creek Wetlands", "Buffalo Creek", "Kleinschmidt Spring (Slough)", "Wolverine Lake outlet", "Wolverine Creek"))
+
+SiteIDDown2022<-factor(WQDayMean2022$SiteID,c("CARCRK2.8", "HICCRK0.5", "PURCRK5.2", "CALCRK0.0", "CHIRVR2.3", "TSICHA49.0", "TSICHA44.6", "KINRVR0.1", "GRACRK0.3", "ESKCRK5.5", "ESKCRK1.7", "MOOCRK11.7", "MOOCRK6.6", "MOOCRK1.4", "MOOCRK0.0", "MOOWTL0.0", "BUFCRK0.0", "KLESPR0.0", "WOLOTL1.7", "WOLCRK1.7"))
+
+SiteNameDown2022<-factor(WQDayMean2022$SiteName, c("Caribou Creek", "Hicks Creek", "Purinton Creek", "California Creek", "Chickaloon River", "Ts'itonhna Channel @ beaver pond culvert", "Ts'itonhna Channel @ MP 68", "Kings River",  "Granite Creek", "Eska Creek (above upper culvert)", "Eska Creek (above Glenn Highway)", "Moose Creek (at upper bridge)", "Moose Creek (at Premier Mine)", "Moose Creek (above Glenn Highway)", "Moose Creek (mouth)", "Moose Creek Wetlands", "Buffalo Creek", "Kleinschmidt Spring (Slough)", "Wolverine Lake outlet", "Wolverine Creek"))
+
+#Alphabetical
+#"Buffalo Creek", "California Creek", "Caribou Creek", "Chickaloon River", "Eska Creek (above Glenn Highway)", "Eska Creek (above upper culvert)", "Granite Creek", "Hicks Creek", "Kings River", "Kleinschmidt Spring (Slough)", "Moose Creek (above Glenn Highway)", "Moose Creek (at Premier Mine)", "Moose Creek (at upper bridge)", "Moose Creek (below Glenn Highway)", "Moose Creek (mouth)", "Moose Creek Wetlands", "Purinton Creek", "Ts'itonhna Channel @ MP 68", Wolverine Creek", "Wolverine Lake outlet"
+
+```
+
+```{r}
+#| label: site-name-data-sets
+
+#this creates, in the Environment pane, individual data sets for all data at a site, data for all but the current water quality year, and data for the current water quality year
+
+CARCRK<-subset(WQData, SiteID=="CARCRK2.8")
+CARCRK15_<-subset(WQDayMean2015_, SiteID=="CARCRK2.8")
+CARCRK2022<-subset(WQDayMean2022, SiteID=="CARCRK2.8")
+
+HICCRK<-subset(WQData, SiteID=="HICCRK0.5")
+HICCRK15_<-subset(WQDayMean2015_, SiteID=="HICCRK0.5")
+HICCRK2022<-subset(WQDayMean2022, SiteID=="HICCRK0.5")
+
+PURCRK<-subset(WQData, SiteID=="PURCRK5.2")
+PURCRK15_<-subset(WQDayMean2015_, SiteID=="PURCRK5.2")
+PURCRK2022<-subset(WQDayMean2022, SiteID=="PURCRK5.2")
+
+CALCRK<-subset(WQData, SiteID=="CALCRK0.0")
+CALCRK15_<-subset(WQDayMean2015_, SiteID=="CALCRK0.0")
+CALCRK2022<-subset(WQDayMean2022, SiteID=="CALCRK0.0")
+
+CHIRVR<-subset(WQData, SiteID=="CHIRVR2.3")
+CHIRVR15_<-subset(WQDayMean2015_, SiteID=="CHIRVR2.3")
+CHIRVR2022<-subset(WQDayMean2022, SiteID=="CHIRVR2.3")
+
+TSICHA44<-subset(WQData, SiteID=="TSICHA44.6")
+TSICHA44.15_<-subset(WQDayMean2015_, SiteID=="TSICHA44.6")
+TSICHA44.2022<-subset(WQDayMean2022, SiteID=="TSICHA44.6")
+
+TSICHA49<-subset(WQData, SiteID=="TSICHA49.0")
+TSICHA49.2022<-subset(WQDayMean2022, SiteID=="TSICHA49.0")
+
+KINRVR<- subset(WQData, SiteID=="KINRVR0.1")
+KINRVR15_<- subset(WQDayMean2015_, SiteID=="KINRVR0.1")
+KINRVR2022<- subset(WQDayMean2022, SiteID=="KINRVR0.1")
+
+GRACRK<-subset(WQData, SiteID=="GRACRK0.3")
+GRACRK15_<-subset(WQDayMean2015_, SiteID=="GRACRK0.3")
+GRACRK2022<-subset(WQDayMean2022, SiteID=="GRACRK0.3")
+
+ESKCRK1.7<-subset(WQData, SiteID=="ESKCRK1.7")
+ESKCRK1.7.15_<-subset(WQDayMean2015_, SiteID=="ESKCRK1.7")
+ESKCRK1.7.2022<-subset(WQDayMean2022, SiteID=="ESKCRK1.7")
+
+ESKCRK5.5<-subset(WQData, SiteID=="ESKCRK5.5")
+ESKCRK5.5.15_<-subset(WQDayMean2015_, SiteID=="ESKCRK5.5")
+ESKCRK5.5.2022<-subset(WQDayMean2022, SiteID=="ESKCRK5.5")
+
+MOOCRK11.7<-subset(WQData, SiteID=="MOOCRK11.7")
+MOOCRK11.7.15_<-subset(WQDayMean2015_, SiteID=="MOOCRK11.7")
+MOOCRK11.7.2022<-subset(WQDayMean2022, SiteID=="MOOCRK11.7")
+
+MOOCRK6.6<-subset(WQData, SiteID=="MOOCRK6.6")
+MOOCRK6.6.15_<-subset(WQDayMean2015_, SiteID=="MOOCRK6.6")
+MOOCRK6.6.2022<-subset(WQDayMean2022, SiteID=="MOOCRK6.6")
+
+MOOCRK1.4<-subset(WQData, SiteID=="MOOCRK1.4")
+MOOCRK1.4.15_<-subset(WQDayMean2015_, SiteID=="MOOCRK1.4")
+MOOCRK1.4.2022<-subset(WQDayMean2022, SiteID=="MOOCRK1.4")
+
+MOOCRK0<-subset(WQData, SiteID=="MOOCRK0.0")
+MOOCRK0.15_<-subset(WQDayMean2015_, SiteID=="MOOCRK0.0")
+MOOCRK0.2022<-subset(WQDayMean2022, SiteID=="MOOCRK0.0")
+
+MOOWTL<-subset(WQData, SiteID=="MOOWTL0.0")
+MOOWTL15_<-subset(WQDayMean2015_, SiteID=="MOOWTL0.0")
+MOOWTL2022<-subset(WQDayMean2022, SiteID=="MOOWTL0.0")
+
+BUFCRK<-subset(WQData, SiteID=="BUFCRK0.0")
+BUFCRK15_<-subset(WQDayMean2015_, SiteID=="BUFCRK0.0")
+BUFCRK2022<-subset(WQDayMean2022, SiteID=="BUFCRK0.0")
+
+KLESPR<-subset(WQData, SiteID=="KLESPR0.0")
+KLESPR15_<-subset(WQDayMean2015_, SiteID=="KLESPR0.0")
+KLESPR2022<-subset(WQDayMean2022, SiteID=="KLESPR0.0")
+
+WOLCRK<-subset(WQData, SiteID=="WOLCRK1.7")
+WOLCRK15_<-subset(WQDayMean2015_, SiteID=="WOLCRK1.7")
+WOLCRK2022<-subset(WQDayMean2022, SiteID=="WOLCRK1.7")
+
+WOLOTL<-subset(WQData, SiteID=="WOLOTL1.7")
+WOLOTL15_<-subset(WQDayMean2015_, SiteID=="WOLOTL1.7")
+WOLOTL2022<-subset(WQDayMean2022, SiteID=="WOLOTL1.7")
+```
+<br>
+
+### *pH* - updated
+<br> The slightly alkaline character of streams is apparent (Fig. 4.3.1). The upper (alkaline) PAL limit is approached at Hick's Creek and the lower is approached at Buffalo Creek and Moose Creek 11.7. The mean and median by site ranges from pH 7.2 to 8.5 (Table A2.2.1).
+
+Regionally (for all sites aggregated), in WQY2022 seasonal minimums have a wider range (6.1-8.1) but similar maximums relative to the aggregate of past years (Table A2.1.1).  
+
+By site, in general, values were more alkaline in WQY2022 than in the past, except at Wolverine Lake outlet (Fig. 4.3.1). The greatest variability in pH occurs in winter and at sites MOOWTL 0.0, MOOCRK 11.7, and BUFCRK 0.0 (Fig. 4.3.1 and Table A2.2.1).
+
+For WQY2022, the lower PAL limit was reached at Buffalo Creek twice and at Moose Creek 11.7 (upper bridge) once, all in January-February. The upper PAL limit was reached at Hicks Creek five times, throughout the year (Table A1.3.1).<br>
+
+* More spring data is needed.
+
+Notably, 
+
+* the Wolverine Lake outlet site (WOLOTL 1.7) was **not** as alkaline as in the past, and even approached the lower PAL limit. Moose Creek at upper bridge (MOOCRK 11.7) reached the lower PAL limit for the first time. **All** PAL exceedances at Hicks Creek occurred between March 2022 and March 2023.
+* the pH **increases** going from upstream to downstream on Moose Creek in WQY2022. This was not observed in WQY2021 or in the aggregate of past years.<br>
+
+<br>
+
+#DontRun_this chunk will create individual figure of param x location
+**Fig. 4.3.1 pH by location ** pH by location.  PAL lines are shown at pH 6.5 and pH 8.5.
+```{r}
+#| label: Fig-pH-x-location
+#| fig-show: hold
+#| out-width: "85%"
+#| eval: false
+
+#use eval false in favor of the for-loop
+#TO DO: figure out labeling for for-loop figures
+#to change the plot height or width, use options(repr.plot.width=5, repr.plot.height=3)
+#2024.12.12 For this to plot without NA or NaN, for some reason I need to use x=SiteID for 2015etc and x=SiteIDDown2022 for adding WQY2022.  
+
+#pH by location
+ggplot(data=WQDayMean2015_)+ 
+  aes(x=SiteID, y=pH)+
+  geom_boxplot(na.rm=TRUE)+
+  ylim(4,10)+
+  xlab("")+
+  ylab("pH")+
+  ggtitle("pH", subtitle= "by Location, Sep 2015-Apr 2023")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))+
+  theme(axis.text=element_text(size=11))+theme(title = element_text(size=12))+
+  WQC_pH1+WQC_pH2+
+  geom_boxplot(data = WQDayMean2022, aes(x=SiteIDDown2022, y=pH, colour=" "), alpha=0.6, linetype="twodash", fill="grey")+ 
+  xlab(" ")+
+  ylab("pH")+
+  theme(legend.position="right")+
+  labs(colour="WQY2022")
+
+```
+<br>
+<br>
+
+### *Temperature* - updated
+<br> 
+Stream temperatures were on the cool end of the range at sites (Fig. 4.3.2), although warmer (6C) regionally in spring based on means and medians (Table A2.1.2). Spring and fall maximums were less extreme (9C, 8C) than in the past (16C, 13C).  The greatest variability in temperatures occurs in the fall (Fig. 4.3.2).
+
+No temperatures at any site went over 10C in WQY2022, with the exception of Wolverine Lake outlet (WOLOTL 1.7), which exceeded 13C in every summer month. At this site, 13C was exceeded in August, 15C in July, and 20C in June (Table A2.1.2, Table A2.2.2). In the past, exceedances were seen at Granite Creek and Purinton Creek; that was not observed this year.
+
+Notably,
+
+* There continues to be open water in the winter at California Creek (CALCRK 0.0), at Kleinschmidt Slough (KLESPR 0.0), and at the clearwater channel Ts'itonhna Channel 44.6 (TSICHA 44.6) with minimum stream temperatures of 1.2C, 1.8C, and 1.3C respectively.<br>
+<br>
+<br>
+
+### *Dissolved oxygen (DO)* - updated
+<br> All sites in WQY2022 had DO means and medians above 7 mg/L (Table A2.2.3), with means and medians similar to the past (12-14 mg/L) and maximums similar to the past (14-17 mg/L) (Table A2.1.3). However minimum DO for aggregated sites by season was higher in the spring than in the past (12 mg/L vs 8 mg/L) and summer and fall were slightly lower. In WQY2022 and in the past, the summer and winter minimums has been below 7 mg/L, driven by the Wolverine Lake outlet site (WOLOTL 1.7) (Fig. 4.3.2). In winter, all values at WOLOTL 1.7 were below 7 mg/L (Fig. 4.3.2).
+
+In WQY 2022, DO was generally on the high end of the range (Fig. 4.3.2). The Kleinschmidt Spring (KLESPR 0.0) and Wolverine Lake outlet (WOLOTL 1.7) sites were on the low end of the range in WQY2022, and sites Wolverine Lake outlet (WOLOTL 1.7) and the new site Ts'itohna Channel 49.0 (TSICHA 49.0) had DO values below 7 mg/L. The low oxygen at the Ts'itonhna Channel site could be due to decomposition of many salmon in the shallow, slow-moving water.  The low oxygen at Wolverine Lake outlet has been hypothesized to be due to ice building up over the mucky bottom, limiting oxygen exchange with the surface.
+
+In WQY2022, PAL limits were exceeded once at Ts'itonhna Channel 49 (TSICHA 49.0, in August) and three times at Wolverine Lake outlet (WOLOTL 1.7 in June, November, January) (Table 1.3.2, Sections A3.6 and A3.12). <br>
+
+Notably,
+
+* DO was generally higher than in the past, but lower at WOLOTL 1.7.
+* DO was below PAL limits at the new site TSICHA 49.0 in summer.
+* DO was below PAL limits at WOLOTL 1.7 at every winter measurement.
+
+### *Specific conductance (SC)* - updated
+<br> When streams are aggregated for a regional view, specific conductance (SC) is generally lower than in the past (as mean, median, and maximum), although the minimums are higher than in past seasons for spring, fall, and winter (Table A2.1.4).
+
+As in the past, streams appear to generally break into three groups, based on mean and minimum values (Table A2.2.4).
+
+* In the past, breakouts (by mean values) were at about < 150 µS/cm, 150-500 µS/cm, and > 500 µS/cm. In WQY2022, breakouts were similar at about < 150 µS/cm, 150-400 µS/cm, and > 400 µS/cm, indicating slightly lower maximum SC values. The streams that fit into each division were the same:
+
+  * Mean > 400 µS/cm at Caribou, Hicks, Purinton Creeks
+  * Mean < 150 µS/cm at Eska Creek, Moose Creek, and Buffalo Creek
+  * Mean 150-400 µS/cm at all other sites
+The new site Ts'itonhna Channel 49.0 (TSICHA 49.0) has mean values over 400 µS/cm, but does not have a full year of data yet. The high mean value for the eastern (Glacier View) sites suggests SC is driven by geology in that area.
+
+In WQY2022, SC was in the range of past years, and has little variability within sites over a season, except at Caribou Creek and Hicks Creek in summer (Fig. 4.3.3). The maximum SC values of all streams aggregated by season were lower than in the past (Table A2.1.4). Seasonal maximums were similar to WQY2021, except that spring had a lower maximum SC.
+
+There are no PAL limits for SC. 
+
+Notably,
+
+* There is little variability at individual sites over a season, except at Caribou and Hicks Creeks in summer.
+* Stream sites continue to breakout into defined groups by mean SC values.
+* The new site Ts'itonhna Channel 49.0 may have high SC but does not have a full year of data yet.
+<br>
+<br>
+
+
+<br>
+#complete through this code chunk
+```{r}
+#| label: Figs-boxplots-for-all-parameters-all-years-all-sites-forloop
+#this chunk will create 5 figures, one for each param x location
+#This wor/s if Specific_conductance_uS_cm is used but not mS_cm
+#For this to be useful, we should put all the text for parameters by location first, then several pages of the figures with captions.
+#To Do: Adding Captions through R code - use the Assign function to say 1=DO, 2=Temp etc. Aleyna has an R Mar/down file that does this.
+#set parameter names
+parameters <- c("pH", "Temperature_C", "Dissolved_oxygen_mg_L", "Specific_conductance_uS_cm", "Turbidity_NTU")
+
+
+# Create numbered titles using assign()
+for (i in seq_along(parameters)) {
+  param <- parameters[i]
+  assign(paste0("title_", param), paste("Fig.", i, "-", param, "By Location, Sep 2015-Apr 2023"))
+}
+
+#design figures
+for (param in parameters) {
+  plot <- ggplot(WQDayMean2015_, aes(x = SiteID, y = !!sym(param))) +
+    geom_boxplot() +
+    labs(title = get(paste0("title_",param)), x = "", y = param) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.text = element_text(size = 11)) +
+    theme(title = element_text(size = 12)) +
+    geom_boxplot(data = WQDayMean2022, 
+                 aes(x = SiteIDDown2022, y = !!sym(param), colour = " "), 
+                 alpha = 0.6, linetype = "twodash", fill = "grey") +
+    xlab(" ") +
+    ylab(param) +
+    theme(legend.position = "right") +
+    labs(colour = "WQY2022")
+  
+  # Add parameter-specific PAL lines
+  if (param == "pH") {
+    plot <- plot + geom_hline(yintercept = c(6.5, 8.5), color = c("blue", "red"))
+  } else if (param == "Temperature_C") {
+    plot <- plot + geom_hline(yintercept = c(13, 15, 20), color = c("blue", "dark green", "red"))
+  } else if (param == "Dissolved_oxygen_mg_L") {
+    plot <- plot + geom_hline(yintercept = 7, color = "red")
+  } else if (param == "Specific_conductance_uS_cm") {
+    plot <- plot + geom_hline(yintercept = 447, color = "dark green")
+  } else if (param == "Turbidity_NTU") {
+    plot <- plot + geom_hline(yintercept = 25, color = "blue")
+  }
+  
+  # Set y-axis limits based on parameter
+  if (param == "pH") {
+    plot <- plot + ylim(4, 10)} 
+  else if (param == "Temperature_C") {
+    plot <- plot + ylim(-5, 25)} 
+  else if (param == "Dissolved_oxygen_mg_L") {
+    plot <- plot + ylim(0, 16)} 
+  else if (param == "Specific_conductance_uS_cm") {
+    plot <- plot + ylim(0, 1250)} 
+  else if (param == "Turbidity_NTU") {
+    plot <- plot + ylim(0, 1000)}
+
+  print(plot)
+}
+
+
+exists("parameters")
+print(parameters)
+```
+
